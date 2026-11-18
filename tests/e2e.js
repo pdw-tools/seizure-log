@@ -186,6 +186,40 @@ const server = http.createServer((req, res) => {
   R.s11_backOnline = await sync();
   R.s11_sheetRows = grid.length - 1;
 
+  // Chip lists: remove, survive reload, restore, removing a selected chip deselects it
+  await p.click('.tabs a[data-view="log"]');
+  await p.click('#sec-what > summary');
+  const symChips = () => p.$$eval('#chips-symptoms .chip', n => n.map(x => x.textContent));
+  await p.click('#chips-symptoms .chip:has-text("Eye flashes")');            // select it first
+  await p.click('#chips-symptoms .chip-tool:has-text("Edit list")');
+  R.c1_editModeChips = (await symChips()).length;
+  await p.click('#chips-symptoms .chip.removable:has-text("Headache")');
+  await p.click('#chips-symptoms .chip.removable:has-text("Eye flashes")');
+  await p.screenshot({ path: OUT + 'chips-edit.png' });
+  await p.click('#chips-symptoms .chip-tool:has-text("Done")');
+  R.c2_afterRemove = await symChips();
+  R.c2_eyeFlashesDeselected = await p.evaluate(() => !document.querySelector('#chips-symptoms [aria-pressed="true"]'));
+  await p.reload(); await wait(500);
+  await p.click('#sec-what > summary');
+  R.c3_afterReload = await symChips();
+  await p.click('#chips-symptoms .chip-tool:has-text("Edit list")');
+  await p.click('#chips-symptoms .chip-tool:has-text("Show removed")');
+  await p.click('#chips-symptoms .chip.restorable:has-text("Headache")');
+  await p.click('#chips-symptoms .chip-tool:has-text("Done")');
+  R.c4_afterRestore = await symChips();
+  // Adding a removed chip by typing brings it back
+  await p.fill('#add-symptoms', 'eye flashes'); await p.press('#add-symptoms', 'Enter');
+  R.c5_typedBack = await p.$$eval('#chips-symptoms .chip[aria-pressed="true"]', n => n.map(x => x.textContent));
+  // History still shows a removed value on past entries (entry A had Nausea)
+  await p.click('#chips-symptoms .chip-tool:has-text("Edit list")');
+  await p.click('#chips-symptoms .chip.removable:has-text("Nausea")');
+  await p.click('#chips-symptoms .chip-tool:has-text("Done")');
+  await p.click('.tabs a[data-view="history"]'); await wait(100);
+  R.c6_historyKeepsNausea = await p.evaluate(() => {
+    const keys = JSON.parse(localStorage.getItem('sl.entries'));
+    return keys.some(e => (e.symptoms || []).indexOf('Nausea') >= 0);
+  });
+
   await p.emulateMedia({ colorScheme: 'dark' });
   await p.click('.tabs a[data-view="setup"]');
   await p.screenshot({ path: OUT + 'pwa-setup-dark.png' });
@@ -208,6 +242,13 @@ const server = http.createServer((req, res) => {
     ['edit and delete reach the Sheet', R.s9_editedA && R.s9_deletedB && R.s9_sheet.length === 3 && R.s9_sheet.some(r => /Edited after sync/.test(r))],
     ['app opens fully offline', R.s10_offlineLoadTitle === 'Seizure Log'],
     ['offline save syncs when back online', R.s11_sheetRows === 4 && /^All entries synced/.test(R.s11_backOnline)],
+    ['chip edit mode shows the list', R.c1_editModeChips >= 12],
+    ['removed chips leave the list', !R.c2_afterRemove.includes('Headache') && !R.c2_afterRemove.includes('Eye flashes')],
+    ['removing a selected chip deselects it', R.c2_eyeFlashesDeselected === true],
+    ['removed chips stay removed after reload', !R.c3_afterReload.includes('Headache')],
+    ['restore puts a chip back', R.c4_afterRestore.includes('Headache')],
+    ['typing a removed chip brings it back selected', R.c5_typedBack.includes('Eye flashes')],
+    ['past entries keep removed values', R.c6_historyKeepsNausea === true],
     ['no horizontal overflow', R.overflow === false],
     ['no unexpected page errors', errs.every(e => /ERR_INTERNET_DISCONNECTED/.test(e))]
   ];

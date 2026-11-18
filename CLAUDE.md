@@ -19,7 +19,9 @@ an Apps Script web app. See README.md for how it works and how it is set up.
 - `index.html`: the whole app (form, history, weekly report, Setup tab, sync).
   Every change is saved to the device first (localStorage `sl.entries`) and
   queued in an outbox (`sl.outbox`), then sent to the Apps Script API. Drafts
-  of unsaved entries live in `sl.draft`.
+  of unsaved entries live in `sl.draft`. Chips removed with "Edit list" are
+  stored per device in `sl.hiddenChips` (lowercase, per group); removing only
+  hides a chip from the list and never changes past entries.
 - `sw.js`: service worker. Caches the app's own files only; never intercepts
   Apps Script requests.
 - `apps-script/Code.gs`: the Google side. `doPost` is the key-protected JSON API

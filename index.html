@@ -102,6 +102,13 @@ textarea { min-height: 128px; resize: vertical; }
 .chip { min-height: 46px; padding: 0 16px; border-radius: 999px; font: inherit; color: var(--ink); background: var(--surface); border: 2px solid var(--line); cursor: pointer; }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
 .chip[aria-pressed="true"]::before { content: "\2713\00a0"; }
+.chip.removable { border-style: dashed; border-color: var(--danger); color: var(--danger); }
+.chip.removable::before { content: "\00d7\00a0"; font-weight: 700; }
+.chip.restorable { border-style: dotted; color: var(--ink-2); }
+.chip.restorable::before { content: "+\00a0"; font-weight: 700; }
+.chip-tool { min-height: 46px; padding: 0 10px; background: none; border: 0; font: inherit; font-weight: 700; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.chip-tool.done { text-decoration: none; border: 2px solid var(--accent); border-radius: 999px; padding: 0 16px; }
+.chip-hint { flex-basis: 100%; margin: 0; }
 
 /* severity */
 .seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -507,7 +514,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
   function errMsg() {
     return 'Could not save on this device. Your entry is still on screen.';
   }
-  var APP_VERSION = '1';
+  var APP_VERSION = '2';
 
   /* ---------- state ---------- */
   var entries = [];
@@ -528,7 +535,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
   // Every change is written to this device immediately and queued in an outbox.
   // The outbox is sent to the Apps Script API whenever a connection is available,
   // so nothing is lost if the network drops or the app is closed mid-save.
-  var K = { entries: 'sl.entries', outbox: 'sl.outbox', config: 'sl.config', sheet: 'sl.sheetUrl', lastSync: 'sl.lastSync', draft: 'sl.draft' };
+  var K = { entries: 'sl.entries', outbox: 'sl.outbox', config: 'sl.config', sheet: 'sl.sheetUrl', lastSync: 'sl.lastSync', draft: 'sl.draft', hidden: 'sl.hiddenChips' };
   var store = {
     get: function (k) { try { var x = localStorage.getItem(k); return x == null ? null : JSON.parse(x); } catch (e) { return null; } },
     set: function (k, val) { try { localStorage.setItem(k, JSON.stringify(val)); return true; } catch (e) { return false; } },
@@ -797,37 +804,89 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
     });
     return Object.keys(c).sort(function (a, b) { return c[b] - c[a]; }).slice(0, max || 10);
   }
-  function optionsFor(key) {
+  // Chips the person removed from a list, per group, stored on this device.
+  // Removing a chip only hides it from the list; past entries keep it.
+  var chipEdit = {}, chipShowRemoved = {};
+  function removedList(key) { var h = store.get(K.hidden) || {}; return h[key] || []; }
+  function setRemoved(key, list) { var h = store.get(K.hidden) || {}; h[key] = list; store.set(K.hidden, h); }
+  function isRemoved(key, x) { return removedList(key).indexOf(x.toLowerCase()) >= 0; }
+  function unremove(key, x) { setRemoved(key, removedList(key).filter(function (k) { return k !== x.toLowerCase(); })); }
+  function isChosen(key, x) {
+    return key === 'location' ? v('#f-location').trim().toLowerCase() === x.toLowerCase() : form[key].has(x);
+  }
+  function optionsFor(key, includeRemoved) {
     var seen = {}, out = [];
     var extra = key === 'location' ? [] : Array.from(form[key]);
     DEFAULTS[key].concat(topFrom(key), extra).forEach(function (x) {
       var k = x.toLowerCase();
       if (!seen[k]) { seen[k] = 1; out.push(x); }
     });
-    return out;
+    return includeRemoved ? out : out.filter(function (x) { return !isRemoved(key, x) || isChosen(key, x); });
+  }
+  function chipTool(label, onclick, extra) {
+    var props = { type: 'button', class: 'chip-tool', onclick: onclick };
+    Object.keys(extra || {}).forEach(function (k) { props[k] = extra[k]; });
+    return el('button', props, label);
+  }
+  function removeChip(key, x) {
+    var list = removedList(key);
+    if (list.indexOf(x.toLowerCase()) < 0) list.push(x.toLowerCase());
+    setRemoved(key, list);
+    if (key === 'location') { if (isChosen(key, x)) $('#f-location').value = ''; }
+    else form[key].delete(x);
+    renderChips(key);
+    updateSummaries();
+    toast('Removed “' + x + '” from this list.');
   }
   function renderChips(key) {
     var root = $('#chips-' + key);
-    root.replaceChildren.apply(root, optionsFor(key).map(function (x) {
-      if (key === 'location') {
-        return el('button', {
-          type: 'button', class: 'chip', 'aria-pressed': String(v('#f-location').trim().toLowerCase() === x.toLowerCase()),
-          onclick: function () { $('#f-location').value = x; refreshLocationChips(); updateSummaries(); }
-        }, x);
-      }
-      return el('button', {
-        type: 'button', class: 'chip', 'aria-pressed': String(form[key].has(x)),
-        onclick: function (ev) {
-          if (form[key].has(x)) form[key].delete(x); else form[key].add(x);
-          ev.currentTarget.setAttribute('aria-pressed', String(form[key].has(x)));
-          updateSummaries();
+    var kids;
+    if (!chipEdit[key]) {
+      kids = optionsFor(key).map(function (x) {
+        if (key === 'location') {
+          return el('button', {
+            type: 'button', class: 'chip', 'aria-pressed': String(isChosen(key, x)),
+            onclick: function () { $('#f-location').value = x; refreshLocationChips(); updateSummaries(); }
+          }, x);
         }
-      }, x);
-    }));
+        return el('button', {
+          type: 'button', class: 'chip', 'aria-pressed': String(form[key].has(x)),
+          onclick: function (ev) {
+            if (form[key].has(x)) form[key].delete(x); else form[key].add(x);
+            ev.currentTarget.setAttribute('aria-pressed', String(form[key].has(x)));
+            updateSummaries();
+          }
+        }, x);
+      });
+      kids.push(chipTool('Edit list', function () { chipEdit[key] = true; renderChips(key); }, { 'aria-label': 'Edit this list of chips' }));
+    } else {
+      var removed = optionsFor(key, true).filter(function (x) { return isRemoved(key, x) && !isChosen(key, x); });
+      kids = [el('p', { class: 'hint chip-hint' }, 'Tap a chip to remove it from this list. Past entries keep it.')];
+      optionsFor(key).forEach(function (x) {
+        kids.push(el('button', {
+          type: 'button', class: 'chip removable', 'aria-label': 'Remove ' + x + ' from this list',
+          onclick: function () { removeChip(key, x); }
+        }, x));
+      });
+      if (chipShowRemoved[key]) {
+        removed.forEach(function (x) {
+          kids.push(el('button', {
+            type: 'button', class: 'chip restorable', 'aria-label': 'Put ' + x + ' back on this list',
+            onclick: function () { unremove(key, x); renderChips(key); toast('Put “' + x + '” back.'); }
+          }, x));
+        });
+      }
+      if (removed.length) {
+        kids.push(chipTool(chipShowRemoved[key] ? 'Hide removed' : 'Show removed (' + removed.length + ')',
+          function () { chipShowRemoved[key] = !chipShowRemoved[key]; renderChips(key); }));
+      }
+      kids.push(chipTool('Done', function () { chipEdit[key] = false; chipShowRemoved[key] = false; renderChips(key); }, { class: 'chip-tool done' }));
+    }
+    root.replaceChildren.apply(root, kids);
   }
   function refreshLocationChips() {
     var cur = v('#f-location').trim().toLowerCase();
-    $$('#chips-location .chip').forEach(function (b) { b.setAttribute('aria-pressed', String(b.textContent.toLowerCase() === cur)); });
+    $$('#chips-location .chip:not(.removable):not(.restorable)').forEach(function (b) { b.setAttribute('aria-pressed', String(b.textContent.toLowerCase() === cur)); });
   }
   function renderAllChips() { ['symptoms', 'triggers', 'precursors', 'improved', 'location'].forEach(renderChips); }
 
@@ -835,7 +894,8 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
     var input = $('#add-' + key);
     var text = input.value.trim();
     if (!text) return;
-    var existing = optionsFor(key).filter(function (o) { return o.toLowerCase() === text.toLowerCase(); })[0];
+    var existing = optionsFor(key, true).filter(function (o) { return o.toLowerCase() === text.toLowerCase(); })[0];
+    unremove(key, existing || text);
     form[key].add(existing || text);
     input.value = '';
     renderChips(key);
