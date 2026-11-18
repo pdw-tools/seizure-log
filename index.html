@@ -1,0 +1,1273 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Seizure Log</title>
+<meta name="description" content="A private log for recording seizures.">
+<meta name="theme-color" content="#EDF1F4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E151B" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Seizure Log">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+/* Layout: one calm column. Time, severity and duration are always visible; everything else folds away so a quick entry is three taps and a detailed one is still possible. Large targets throughout, no drag, no hover-only controls. */
+:root {
+  --bg: #EDF1F4;
+  --surface: #FFFFFF;
+  --sunken: #E2E9EE;
+  --ink: #13202B;
+  --ink-2: #465867;
+  --line: #BFCBD5;
+  --accent: #1A6A8C;
+  --on-accent: #FFFFFF;
+  --focus: #0A4A66;
+  --danger: #A82525;
+  --mild-bg: #DDEFE2; --mild-fg: #18532D;
+  --mod-bg: #FAE8C8;  --mod-fg: #6E4300;
+  --sev-bg: #F6D6D6;  --sev-fg: #80181A;
+  --font-body: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-head: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E151B; --surface: #16202A; --sunken: #1F2C38; --ink: #E7EEF3; --ink-2: #A3B4C1; --line: #2F3F4D;
+    --accent: #6CC3E0; --on-accent: #06222E; --focus: #9ADCF2; --danger: #F28B8B;
+    --mild-bg: #1E3A28; --mild-fg: #9ADBB0;
+    --mod-bg: #44331A;  --mod-fg: #F2C77A;
+    --sev-bg: #4A2224;  --sev-fg: #F5A3A3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E151B; --surface: #16202A; --sunken: #1F2C38; --ink: #E7EEF3; --ink-2: #A3B4C1; --line: #2F3F4D;
+  --accent: #6CC3E0; --on-accent: #06222E; --focus: #9ADCF2; --danger: #F28B8B;
+  --mild-bg: #1E3A28; --mild-fg: #9ADBB0;
+  --mod-bg: #44331A;  --mod-fg: #F2C77A;
+  --sev-bg: #4A2224;  --sev-fg: #F5A3A3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+:root { color-scheme: light; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 17px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 28px;
+}
+.shell { max-width: 44rem; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1, h2, h3 { font-family: var(--font-head); margin: 0; text-wrap: balance; }
+h1 { font-size: 1.75rem; line-height: 1.15; }
+h2 { font-size: 1.3rem; }
+h3 { font-size: 1.05rem; }
+p { margin: 0; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.sub { color: var(--ink-2); margin-top: 4px; }
+
+/* tabs */
+.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: var(--sunken); padding: 6px; border-radius: var(--r); }
+.tabs a { min-height: 48px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 6px; border-radius: 10px; text-decoration: none; color: var(--ink-2); font-weight: 700; border: 2px solid transparent; }
+.tabs a[aria-current="page"] { background: var(--surface); color: var(--ink); border-color: var(--line); }
+
+.banner { background: var(--sunken); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+
+/* cards and forms */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; }
+.lbl { font-weight: 700; display: block; margin-bottom: 4px; }
+.hint { color: var(--ink-2); font-size: .92rem; }
+.inp, textarea {
+  width: 100%; min-height: 52px; padding: 12px 14px; font: inherit; font-size: 1rem; color: var(--ink);
+  background: var(--surface); border: 2px solid var(--line); border-radius: 12px;
+}
+textarea { min-height: 128px; resize: vertical; }
+.inp:focus, textarea:focus { border-color: var(--focus); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+.row > * { min-width: 0; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+
+.btn { min-height: 52px; padding: 0 20px; border-radius: 12px; font: inherit; font-weight: 700; border: 2px solid transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn.danger { color: var(--danger); border-color: var(--danger); }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }
+
+.chip { min-height: 46px; padding: 0 16px; border-radius: 999px; font: inherit; color: var(--ink); background: var(--surface); border: 2px solid var(--line); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+.chip[aria-pressed="true"]::before { content: "\2713\00a0"; }
+
+/* severity */
+.seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.seg { min-height: 76px; border-radius: 12px; border: 2px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px 4px; }
+.seg b { font-family: var(--font-head); font-size: 1.4rem; line-height: 1; }
+.seg span { font-weight: 700; }
+.seg[aria-pressed="true"] { border-width: 3px; }
+.seg[data-sev="1"][aria-pressed="true"] { background: var(--mild-bg); color: var(--mild-fg); border-color: var(--mild-fg); }
+.seg[data-sev="2"][aria-pressed="true"] { background: var(--mod-bg); color: var(--mod-fg); border-color: var(--mod-fg); }
+.seg[data-sev="3"][aria-pressed="true"] { background: var(--sev-bg); color: var(--sev-fg); border-color: var(--sev-fg); }
+.seg[aria-pressed="true"] span::before { content: "\2713\00a0"; }
+
+.opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.opt { min-height: 50px; border-radius: 12px; border: 2px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+.opt[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.opt[aria-pressed="true"]::before { content: "\2713\00a0"; }
+
+/* stepper */
+.stepper { display: inline-flex; align-items: center; gap: 12px; }
+.stepper .btn { min-width: 56px; padding: 0; font-size: 1.4rem; }
+.stepper output { min-width: 2.5ch; text-align: center; font-family: var(--font-head); font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+
+.custom-dur { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* folded sections */
+details.sec { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+details.sec > summary { list-style: none; cursor: pointer; min-height: 60px; padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: var(--r); }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::after { content: ""; flex: none; width: 10px; height: 10px; border-right: 3px solid var(--ink-2); border-bottom: 3px solid var(--ink-2); transform: rotate(45deg); margin-left: 4px; }
+details.sec[open] > summary::after { transform: rotate(-135deg); }
+details.sec .t { font-family: var(--font-head); font-weight: 700; font-size: 1.05rem; }
+details.sec .sum { color: var(--ink-2); font-size: .92rem; margin-left: auto; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+details.sec .body { padding: 4px 16px 16px; display: grid; gap: 16px; }
+.field { display: grid; gap: 8px; }
+.add-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.mic { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.mic[aria-pressed="true"] { background: var(--danger); border-color: var(--danger); color: var(--bg); }
+.mic svg { width: 18px; height: 18px; fill: currentColor; }
+.partial { color: var(--ink-2); font-style: italic; min-height: 1.5em; }
+
+.toggle { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; border: 2px solid var(--line); border-radius: 12px; background: var(--surface); font: inherit; color: var(--ink); text-align: left; cursor: pointer; width: 100%; }
+.toggle .box { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 3px solid var(--ink-2); display: grid; place-items: center; font-weight: 700; line-height: 1; }
+.toggle[aria-pressed="true"] { border-color: var(--accent); }
+.toggle[aria-pressed="true"] .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.toggle[aria-pressed="true"] .box::after { content: "\2713"; }
+
+.savebar { position: sticky; bottom: 0; display: flex; gap: 10px; padding: 12px 0 8px; background: var(--bg); border-top: 1px solid var(--line); margin-top: 4px; }
+.savebar .btn { flex: 1; }
+.edit-note { background: var(--mod-bg); color: var(--mod-fg); border-radius: 12px; padding: 12px 16px; font-weight: 700; }
+form#entry-form { display: grid; gap: 12px; }
+
+/* history */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 10px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.stat .k { color: var(--ink-2); font-size: .9rem; }
+.stat .v { font-family: var(--font-head); font-size: 1.5rem; font-variant-numeric: tabular-nums; font-weight: 700; }
+.day-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 10px 2px 0; color: var(--ink-2); font-family: var(--font-head); font-weight: 700; }
+.list { display: grid; gap: 10px; }
+.entry { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.entry-head { width: 100%; text-align: left; font: inherit; color: var(--ink); background: none; border: 0; padding: 14px 16px; min-height: 64px; cursor: pointer; display: grid; gap: 6px; }
+.entry-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.time { font-family: var(--font-head); font-weight: 700; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.meta { color: var(--ink-2); }
+.pill { padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: .88rem; border: 2px solid currentColor; }
+.pill.s1 { background: var(--mild-bg); color: var(--mild-fg); }
+.pill.s2 { background: var(--mod-bg); color: var(--mod-fg); }
+.pill.s3 { background: var(--sev-bg); color: var(--sev-fg); }
+.pill.neutral { background: var(--sunken); color: var(--ink-2); }
+.snip { color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.entry-body { padding: 0 16px 16px; display: grid; gap: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+dl.rows { margin: 0; display: grid; grid-template-columns: minmax(7rem, 11rem) 1fr; gap: 8px 14px; }
+dl.rows dt { color: var(--ink-2); font-size: .9rem; padding-top: 2px; }
+dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.empty { background: var(--surface); border: 2px dashed var(--line); border-radius: var(--r); padding: 24px 18px; color: var(--ink-2); }
+.empty strong { color: var(--ink); display: block; font-family: var(--font-head); font-size: 1.1rem; margin-bottom: 4px; }
+
+/* report */
+.weeknav { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.weeknav .label { text-align: center; font-family: var(--font-head); font-weight: 700; }
+.sumline { display: flex; flex-wrap: wrap; gap: 8px; }
+.day { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 12px; }
+.day h3 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.day h3 .n { color: var(--ink-2); font-weight: 500; font-size: .95rem; }
+.rep-entry { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 10px; }
+.rep-entry:first-of-type { border-top: 0; padding-top: 0; }
+.syncbar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); font-size: .95rem; }
+.syncbar > span { min-width: 0; flex: 1 1 12rem; }
+.syncbar[data-state="warn"] { background: var(--mod-bg); color: var(--mod-fg); border-color: var(--mod-fg); }
+.btn.small { min-height: 44px; padding: 0 14px; font-size: .95rem; }
+.pill.pending { background: var(--mod-bg); color: var(--mod-fg); border-style: dashed; }
+.savebar { padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+#copy-box { min-height: 220px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85rem; }
+
+#toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(96px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 32px); background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 12px; font-weight: 700; z-index: 20; text-align: center; }
+
+@media (max-width: 480px) {
+  dl.rows { grid-template-columns: 1fr; gap: 2px; }
+  dl.rows dd { margin-bottom: 8px; }
+  details.sec .sum { font-size: .85rem; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>Seizure Log</h1>
+    <p class="sub">One entry per seizure. Only the time is required.</p>
+  </header>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#log" data-view="log">Log</a>
+    <a href="#history" data-view="history">History</a>
+    <a href="#report" data-view="report">Report</a>
+    <a href="#setup" data-view="setup">Setup</a>
+  </nav>
+  <div class="syncbar" id="syncbar" role="status" aria-live="polite">
+    <span id="sync-text">Loading…</span>
+    <button type="button" class="btn ghost small" id="btn-sync" hidden>Sync now</button>
+  </div>
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <!-- LOG -->
+  <section id="view-log" aria-labelledby="h-log">
+    <h2 id="h-log" style="margin-bottom:12px">Log a seizure</h2>
+    <p id="edit-note" class="edit-note" hidden></p>
+    <form id="entry-form" novalidate autocomplete="off">
+      <div class="card">
+        <h3>When</h3>
+        <div class="row" id="when-quick">
+          <button type="button" class="chip" data-off="0">Just now</button>
+          <button type="button" class="chip" data-off="15">15 min ago</button>
+          <button type="button" class="chip" data-off="60">1 hour ago</button>
+          <button type="button" class="chip" data-off="180">3 hours ago</button>
+        </div>
+        <div>
+          <label class="lbl" for="f-when">Date and time</label>
+          <input class="inp" type="datetime-local" id="f-when">
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 id="h-sev">How severe</h3>
+        <div class="seg3" role="group" aria-labelledby="h-sev" id="sev-group">
+          <button type="button" class="seg" data-sev="1" aria-pressed="false"><b>1</b><span>Mild</span></button>
+          <button type="button" class="seg" data-sev="2" aria-pressed="false"><b>2</b><span>Moderate</span></button>
+          <button type="button" class="seg" data-sev="3" aria-pressed="false"><b>3</b><span>Severe</span></button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 id="h-dur">How long</h3>
+        <div class="row" id="dur-chips" role="group" aria-labelledby="h-dur"></div>
+        <div>
+          <span class="lbl" id="h-dur-custom">Or enter it</span>
+          <div class="custom-dur" role="group" aria-labelledby="h-dur-custom">
+            <input class="inp" type="number" inputmode="decimal" min="0" step="any" id="f-dur-n" placeholder="Length" aria-label="Duration length">
+            <select class="inp" id="f-dur-u" aria-label="Duration unit">
+              <option value="sec">seconds</option>
+              <option value="min" selected>minutes</option>
+            </select>
+          </div>
+        </div>
+        <div class="row-between">
+          <span class="lbl" id="h-count" style="margin:0">Seizures in this entry</span>
+          <div class="stepper" role="group" aria-labelledby="h-count">
+            <button type="button" class="btn ghost" id="cnt-minus" aria-label="One fewer">&minus;</button>
+            <output id="cnt-val" aria-live="polite">1</output>
+            <button type="button" class="btn ghost" id="cnt-plus" aria-label="One more">+</button>
+          </div>
+        </div>
+      </div>
+
+      <details class="sec" id="sec-what">
+        <summary><span class="t">What happened</span><span class="sum" id="sum-what">Optional</span></summary>
+        <div class="body">
+          <div class="field">
+            <span class="lbl" id="h-sym">Symptoms</span>
+            <div class="row" id="chips-symptoms" role="group" aria-labelledby="h-sym"></div>
+            <div class="add-row"><input class="inp" type="text" id="add-symptoms" placeholder="Add your own" aria-label="Add a symptom"><button type="button" class="btn ghost" data-add="symptoms">Add</button></div>
+          </div>
+          <div class="field">
+            <div class="row-between">
+              <label class="lbl" for="f-desc" style="margin:0">Description</label>
+              
+            </div>
+            <textarea id="f-desc" placeholder="What you or others noticed, before, during and after"></textarea>
+            
+          </div>
+          <div class="field">
+            <label class="lbl" for="f-location">Where</label>
+            <div class="row" id="chips-location" role="group" aria-label="Common places"></div>
+            <input class="inp" type="text" id="f-location" placeholder="Or type a place">
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" id="sec-signs">
+        <summary><span class="t">Triggers and warning signs</span><span class="sum" id="sum-signs">Optional</span></summary>
+        <div class="body">
+          <div class="field">
+            <span class="lbl" id="h-trig">Possible triggers</span>
+            <div class="row" id="chips-triggers" role="group" aria-labelledby="h-trig"></div>
+            <div class="add-row"><input class="inp" type="text" id="add-triggers" placeholder="Add your own" aria-label="Add a trigger"><button type="button" class="btn ghost" data-add="triggers">Add</button></div>
+          </div>
+          <div class="field">
+            <span class="lbl" id="h-prec">Warning signs before it</span>
+            <div class="row" id="chips-precursors" role="group" aria-labelledby="h-prec"></div>
+            <div class="add-row"><input class="inp" type="text" id="add-precursors" placeholder="Add your own" aria-label="Add a warning sign"><button type="button" class="btn ghost" data-add="precursors">Add</button></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" id="sec-help">
+        <summary><span class="t">What helped</span><span class="sum" id="sum-help">Optional</span></summary>
+        <div class="body">
+          <button type="button" class="toggle" id="f-stopped" aria-pressed="false"><span class="box" aria-hidden="true"></span><span>I stopped this seizure myself</span></button>
+          <div class="field">
+            <span class="lbl" id="h-imp">Improved with</span>
+            <div class="row" id="chips-improved" role="group" aria-labelledby="h-imp"></div>
+            <div class="add-row"><input class="inp" type="text" id="add-improved" placeholder="Add your own" aria-label="Add something that helped"><button type="button" class="btn ghost" data-add="improved">Add</button></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" id="sec-impact">
+        <summary><span class="t">Impact</span><span class="sum" id="sum-impact">Optional</span></summary>
+        <div class="body">
+          <div class="field">
+            <span class="lbl" id="h-day">Impact on your day</span>
+            <div class="opts" role="group" aria-labelledby="h-day">
+              <button type="button" class="opt" data-group="day" data-v="none" aria-pressed="false">None</button>
+              <button type="button" class="opt" data-group="day" data-v="some" aria-pressed="false">Some</button>
+              <button type="button" class="opt" data-group="day" data-v="lot" aria-pressed="false">A lot</button>
+            </div>
+            <input class="inp" type="text" id="f-day-note" placeholder="Details (optional)" aria-label="Impact on your day, details">
+          </div>
+          <div class="field">
+            <span class="lbl" id="h-others">Impact on others</span>
+            <div class="opts" role="group" aria-labelledby="h-others">
+              <button type="button" class="opt" data-group="others" data-v="none" aria-pressed="false">None</button>
+              <button type="button" class="opt" data-group="others" data-v="some" aria-pressed="false">Some</button>
+              <button type="button" class="opt" data-group="others" data-v="lot" aria-pressed="false">A lot</button>
+            </div>
+            <input class="inp" type="text" id="f-others-note" placeholder="Details (optional)" aria-label="Impact on others, details">
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" id="sec-notes">
+        <summary><span class="t">Anything else</span><span class="sum" id="sum-notes">Optional</span></summary>
+        <div class="body">
+          <div class="field">
+            <div class="row-between">
+              <label class="lbl" for="f-notes" style="margin:0">Notes</label>
+              
+            </div>
+            <textarea id="f-notes" placeholder="Anything to raise at your next appointment"></textarea>
+            
+          </div>
+        </div>
+      </details>
+
+      <div class="savebar">
+        <button type="button" class="btn ghost" id="btn-cancel" hidden>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-save">Save seizure</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="view-history" aria-labelledby="h-hist" hidden>
+    <h2 id="h-hist" style="margin-bottom:12px">History</h2>
+    <div class="stats" id="stats"></div>
+    <div id="history-list" class="list" style="margin-top:6px"></div>
+  </section>
+
+  <!-- REPORT -->
+  <section id="view-report" aria-labelledby="h-rep" hidden>
+    <h2 id="h-rep" style="margin-bottom:12px">Weekly report</h2>
+    <div class="list">
+      <div class="weeknav">
+        <button type="button" class="btn ghost" id="wk-prev" aria-label="Previous week">&larr; Prev</button>
+        <div class="label" id="wk-label"></div>
+        <button type="button" class="btn ghost" id="wk-next" aria-label="Next week">Next &rarr;</button>
+      </div>
+      <div class="sumline" id="wk-sum"></div>
+      <div id="wk-days" class="list"></div>
+      <div class="card">
+        <h3>Share with your physician</h3>
+        <p class="hint">The report follows the paper log: Sunday to Saturday, with every field you filled in. Every synced entry is also a row in your Google Sheet, which you can share or download from there.</p>
+        <div class="row">
+          <button type="button" class="btn primary" id="btn-copy">Copy this week as text</button>
+          <button type="button" class="btn ghost" id="btn-csv">Download all entries (CSV)</button>
+          <a class="btn ghost" id="btn-sheet" href="#" target="_blank" rel="noopener" hidden style="text-decoration:none">Open the spreadsheet</a>
+          <button type="button" class="btn ghost" id="btn-this-week">Jump to this week</button>
+        </div>
+        <textarea id="copy-box" readonly hidden aria-label="Report text, select and copy"></textarea>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="view-setup" aria-labelledby="h-setup" hidden>
+    <h2 id="h-setup" style="margin-bottom:12px">Setup</h2>
+    <div class="list">
+      <div class="card">
+        <h3>Connect to your Google Sheet</h3>
+        <p class="hint">Paste the two values from your Apps Script project. They are stored only on this device. Until you connect, entries are kept on this device only.</p>
+        <div>
+          <label class="lbl" for="cfg-url">Apps Script web app link</label>
+          <input class="inp" type="url" id="cfg-url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <div>
+          <label class="lbl" for="cfg-key">App key</label>
+          <input class="inp" type="password" id="cfg-key" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="row">
+          <button type="button" class="btn primary" id="btn-cfg-save">Save and test</button>
+          <button type="button" class="btn ghost" id="btn-cfg-show" aria-pressed="false">Show key</button>
+        </div>
+        <p class="hint" id="cfg-status" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
+        <h3>On this device</h3>
+        <p class="hint" id="device-info"></p>
+        <div class="row"><button type="button" class="btn ghost danger" id="btn-cfg-forget" hidden>Disconnect this device</button></div>
+      </div>
+      <div class="card">
+        <h3>Install on your phone</h3>
+        <p class="hint">iPhone: open this page in Safari, tap Share, then Add to Home Screen. Connect inside the installed app, because the home-screen app keeps its own storage, separate from Safari.</p>
+        <p class="hint">Android: open the browser menu and choose Install app or Add to Home screen.</p>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- constants ---------- */
+  var SEV = { 1: 'Mild', 2: 'Moderate', 3: 'Severe' };
+  var LEVEL = { none: 'None', some: 'Some', lot: 'A lot' };
+  var DEFAULTS = {
+    symptoms: ['Nausea', 'Eye flashes', 'Rapid blinking', 'Twitching or shaking', 'Spasming or stiffening', 'Numbness', 'Tingling', 'Weakness', 'Dizziness', 'Confusion', 'Loss of awareness', 'Headache'],
+    triggers: ['Missed sleep', 'Stress', 'Illness', 'Missed medication', 'Overheating', 'Flashing lights', 'Skipped meal', 'Alcohol'],
+    precursors: ['Aura', 'Dizziness', 'Nausea', 'Headache', 'Unusual smell or taste', 'Déjà vu', 'Tiredness', 'Mood change'],
+    improved: ['Rest', 'Medication', 'Changed position', 'Quiet or dark room', 'Time passing', 'Someone helped'],
+    location: ['Home', 'Outdoors', 'In a vehicle', 'Store or public place', 'Work or school']
+  };
+  var DUR_CHIPS = [[15, '15 sec'], [30, '30 sec'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']];
+  var STORE_KEY = 'seizure-log-v1';
+
+  /* ---------- tiny helpers ---------- */
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function el(tag, props) {
+    var n = document.createElement(tag);
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      var v = props[k];
+      if (v == null || v === false) return;
+      if (k === 'class') n.className = v;
+      else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? '' : v);
+    });
+    for (var i = 2; i < arguments.length; i++) {
+      var kids = [].concat(arguments[i]);
+      kids.forEach(function (k) { if (k == null || k === false) return; n.append(k.nodeType ? k : document.createTextNode(String(k))); });
+    }
+    return n;
+  }
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  function toInputValue(ms) { var d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function dayKey(ms) { var d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function startOfDay(ms) { var d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
+  function startOfWeek(ms) { var d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay()).getTime(); }
+  function addDays(ms, n) { var d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime(); }
+  function fmtTime(ms) { return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  function fmtDay(ms) { return new Date(ms).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }); }
+  function fmtShort(ms) { return new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' }); }
+  function fmtLong(ms) { return new Date(ms).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); }
+  function fmtDur(sec) {
+    if (sec == null) return '';
+    if (sec < 60) return Math.round(sec) + ' sec';
+    var m = Math.floor(sec / 60), s = Math.round(sec - m * 60);
+    return s ? m + ' min ' + s + ' sec' : m + ' min';
+  }
+  function plural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
+  function v(sel) { var n = $(sel); return n ? n.value : ''; }
+  function sumCounts(list) { return list.reduce(function (s, e) { return s + (e.count || 1); }, 0); }
+
+  var toastTimer;
+  function toast(msg) {
+    var t = $('#toast');
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 4000);
+  }
+  function showBanner(msg) { var b = $('#banner'); b.textContent = msg; b.hidden = false; }
+  function hideBanner() { $('#banner').hidden = true; }
+  function errMsg() {
+    return 'Could not save on this device. Your entry is still on screen.';
+  }
+  var APP_VERSION = '1';
+
+  /* ---------- state ---------- */
+  var entries = [];
+  var loaded = false;
+  var backend = null;
+  var editingId = null;
+  var weekStart = startOfWeek(Date.now());
+  var expanded = {};
+  var whenTouched = false;
+  var form = freshForm();
+  var optionSig = '';
+
+  function freshForm() {
+    return { severity: null, dur: null, count: 1, symptoms: new Set(), triggers: new Set(), precursors: new Set(), improved: new Set(), stopped: false, dayLevel: null, othersLevel: null };
+  }
+
+  /* ---------- storage: this device first, then your Google Sheet ---------- */
+  // Every change is written to this device immediately and queued in an outbox.
+  // The outbox is sent to the Apps Script API whenever a connection is available,
+  // so nothing is lost if the network drops or the app is closed mid-save.
+  var K = { entries: 'sl.entries', outbox: 'sl.outbox', config: 'sl.config', sheet: 'sl.sheetUrl', lastSync: 'sl.lastSync', draft: 'sl.draft' };
+  var store = {
+    get: function (k) { try { var x = localStorage.getItem(k); return x == null ? null : JSON.parse(x); } catch (e) { return null; } },
+    set: function (k, val) { try { localStorage.setItem(k, JSON.stringify(val)); return true; } catch (e) { return false; } },
+    remove: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  var outbox = [];
+  var config = null;
+  var syncing = false, resyncWanted = false, lastSync = 0, syncError = null;
+
+  function persist() {
+    var ok = store.set(K.entries, entries) && store.set(K.outbox, outbox);
+    if (!ok) showBanner('This device would not let the app store your entries. Keep the app open until the bar above says everything is synced.');
+    return ok;
+  }
+  function pendingIds() {
+    var m = {};
+    outbox.forEach(function (o) { m[o.op === 'save' ? o.entry.id : o.id] = true; });
+    return m;
+  }
+  function newId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
+  function api(action, extra, cfg) {
+    cfg = cfg || config;
+    var body = { key: cfg.key, action: action };
+    Object.keys(extra || {}).forEach(function (k) { body[k] = extra[k]; });
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 30000) : null;
+    return fetch(cfg.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      redirect: 'follow',
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (r) { return r.text(); }).then(function (text) {
+      var j;
+      try { j = JSON.parse(text); } catch (e) {
+        var bad = new Error('bad response'); bad.code = 'not_api'; throw bad;
+      }
+      if (!j || !j.ok) {
+        var err = new Error((j && j.error) || 'error');
+        err.code = j && j.error === 'unauthorized' ? 'unauthorized' : 'server';
+        throw err;
+      }
+      return j.data;
+    }).catch(function (err) {
+      if (!err.code) err.code = navigator.onLine === false ? 'offline' : 'network';
+      throw err;
+    }).then(function (data) { if (timer) clearTimeout(timer); return data; }, function (err) { if (timer) clearTimeout(timer); throw err; });
+  }
+
+  function pull() {
+    return api('list').then(function (list) {
+      var pend = pendingIds();
+      var merged = list.filter(function (e) { return !pend[e.id]; });
+      entries.forEach(function (e) { if (pend[e.id]) merged.push(e); });
+      entries = merged;
+      persist();
+    });
+  }
+
+  function flush() {
+    if (!config) { updateSyncUI(); return Promise.resolve(); }
+    if (syncing) { resyncWanted = true; return Promise.resolve(); }
+    syncing = true; updateSyncUI();
+    function next() {
+      if (!outbox.length) return Promise.resolve();
+      var op = outbox[0];
+      var p = op.op === 'save' ? api('save', { entry: op.entry }) : api('remove', { id: op.id });
+      return p.then(function (res) {
+        var i = outbox.indexOf(op);
+        if (i >= 0) outbox.splice(i, 1);
+        if (op.op === 'save' && res && res.id && !pendingIds()[res.id]) {
+          entries = entries.map(function (e) { return e.id === res.id ? res : e; });
+        }
+        persist();
+        return next();
+      });
+    }
+    return next().then(pull).then(function () {
+      syncError = null; lastSync = Date.now(); store.set(K.lastSync, lastSync);
+    }).catch(function (err) {
+      syncError = err.code || 'error';
+    }).then(function () {
+      syncing = false;
+      afterEntriesChanged();
+      if (resyncWanted) { resyncWanted = false; flush(); }
+    });
+  }
+
+  function syncText() {
+    var n = outbox.length;
+    var waiting = n ? plural(n, 'change') + ' saved on this device, not yet synced.' : '';
+    if (!config) return { state: 'warn', text: n ? waiting + ' Connect your Google Sheet on the Setup tab.' : 'Not connected yet: entries are saved on this device only. Connect on the Setup tab.' };
+    if (syncing) return { state: '', text: 'Syncing…' };
+    if (syncError === 'unauthorized') return { state: 'warn', text: 'Your Google Sheet refused the app key. Check it on the Setup tab. ' + waiting };
+    if (syncError === 'not_api') return { state: 'warn', text: 'The Apps Script link did not answer as expected. Check it on the Setup tab. ' + waiting };
+    if (syncError) return { state: n ? 'warn' : '', text: (n ? waiting : 'Could not reach your Google Sheet.') + (syncError === 'offline' ? ' You seem to be offline.' : ' Will try again.') };
+    if (n) return { state: '', text: plural(n, 'change') + ' waiting to sync.' };
+    return { state: '', text: 'All entries synced' + (lastSync ? ' · last checked ' + fmtTime(lastSync) : '') + '.' };
+  }
+  function updateSyncUI() {
+    var st = syncText();
+    $('#sync-text').textContent = st.text.trim();
+    $('#syncbar').dataset.state = st.state;
+    $('#btn-sync').hidden = !config || syncing;
+    var sheet = store.get(K.sheet);
+    var a = $('#btn-sheet');
+    if (sheet && config) { a.href = sheet; a.hidden = false; } else a.hidden = true;
+  }
+
+  function initStore() {
+    entries = store.get(K.entries) || [];
+    outbox = store.get(K.outbox) || [];
+    config = store.get(K.config);
+    lastSync = store.get(K.lastSync) || 0;
+    loaded = true;
+    backend = {
+      save: function (id, data) {
+        data.id = id || newId();
+        data.local = toInputValue(data.at).replace('T', ' ');
+        var found = false;
+        entries = entries.map(function (e) { if (e.id === data.id) { found = true; return data; } return e; });
+        if (!found) entries.push(data);
+        outbox = outbox.filter(function (o) { return !(o.op === 'save' && o.entry.id === data.id); });
+        outbox.push({ op: 'save', entry: data });
+        if (!persist()) return Promise.reject(new Error('storage'));
+        afterEntriesChanged();
+        flush();
+        return Promise.resolve(data.id);
+      },
+      remove: function (id) {
+        entries = entries.filter(function (e) { return e.id !== id; });
+        outbox = outbox.filter(function (o) { return !(o.op === 'save' && o.entry.id === id); });
+        outbox.push({ op: 'remove', id: id });
+        if (!persist()) return Promise.reject(new Error('storage'));
+        afterEntriesChanged();
+        flush();
+        return Promise.resolve();
+      }
+    };
+    afterEntriesChanged();
+    flush();
+  }
+
+  /* ---------- setup tab ---------- */
+  function renderSetup() {
+    if (config && document.activeElement !== $('#cfg-url') && document.activeElement !== $('#cfg-key')) {
+      if (!$('#cfg-url').value) $('#cfg-url').value = config.url;
+      if (!$('#cfg-key').value) $('#cfg-key').value = config.key;
+    }
+    $('#device-info').textContent = plural(entries.length, 'entry') .replace('entrys', 'entries') + ' on this device · ' +
+      (outbox.length ? plural(outbox.length, 'change') + ' not yet synced' : 'nothing waiting to sync') + ' · ' +
+      (config ? 'connected' : 'not connected') + ' · app version ' + APP_VERSION;
+    $('#btn-cfg-forget').hidden = !config;
+  }
+  function saveSetup() {
+    var url = v('#cfg-url').trim(), key = v('#cfg-key').trim();
+    var status = $('#cfg-status');
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(url)) {
+      status.textContent = 'The link should start with https://script.google.com/macros/s/ and end with /exec. Copy it from Deploy → Manage deployments.';
+      return;
+    }
+    if (key.length < 20) { status.textContent = 'That key looks too short. Copy the whole key from the Execution log.'; return; }
+    var btn = $('#btn-cfg-save');
+    btn.disabled = true; status.textContent = 'Testing the connection…';
+    var cfg = { url: url, key: key };
+    api('ping', {}, cfg).then(function (info) {
+      config = cfg;
+      store.set(K.config, cfg);
+      if (info && info.sheetUrl) store.set(K.sheet, info.sheetUrl);
+      syncError = null;
+      status.textContent = 'Connected. Syncing your entries now.';
+      flush();
+      renderSetup();
+    }).catch(function (err) {
+      status.textContent = {
+        unauthorized: 'Connected to your Apps Script, but it refused the key. Copy the key again from the Execution log; if you created a new key since, use the newest one.',
+        not_api: 'That link answered, but not like the app’s Apps Script. Check that the deployment’s "Who has access" is set to Anyone, and that the script was saved before deploying.',
+        offline: 'You seem to be offline. Connect to the internet and try again.'
+      }[err.code] || 'Could not reach that link. Check it and your connection, then try again.';
+    }).then(function () { btn.disabled = false; });
+  }
+  var forgetArmed = false, forgetTimer;
+  function forgetSetup() {
+    var b = $('#btn-cfg-forget');
+    if (!forgetArmed) {
+      forgetArmed = true;
+      b.textContent = outbox.length ? 'Tap again: ' + plural(outbox.length, 'change') + ' will stay unsynced' : 'Tap again to disconnect';
+      forgetTimer = setTimeout(function () { forgetArmed = false; b.textContent = 'Disconnect this device'; }, 4000);
+      return;
+    }
+    clearTimeout(forgetTimer); forgetArmed = false; b.textContent = 'Disconnect this device';
+    config = null;
+    store.remove(K.config); store.remove(K.sheet);
+    $('#cfg-url').value = ''; $('#cfg-key').value = '';
+    $('#cfg-status').textContent = 'Disconnected. Entries stay on this device.';
+    afterEntriesChanged();
+  }
+
+  /* ---------- draft: keep a half-filled entry across reloads ---------- */
+  var draftTimer;
+  function formHasContent(d) {
+    return !!(d.severity || d.duration != null || d.count > 1 || d.description || d.location || d.notes || d.stopped ||
+      d.symptoms.length || d.triggers.length || d.precursors.length || d.improved.length || d.dayImpact || d.othersImpact);
+  }
+  function saveDraft() {
+    clearTimeout(draftTimer);
+    if (editingId) return;
+    var d = collect();
+    if (!d || !formHasContent(d)) { store.remove(K.draft); return; }
+    store.set(K.draft, d);
+  }
+  function scheduleDraft() { if (editingId) return; clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 300); }
+  function clearDraft() { clearTimeout(draftTimer); store.remove(K.draft); }
+  function restoreDraft() {
+    var d = store.get(K.draft);
+    if (!d || !isFinite(d.at)) return false;
+    fillForm(d);
+    whenTouched = true;
+    return true;
+  }
+
+  /* ---------- CSV ---------- */
+  function csvCell(val) {
+    var s = val == null ? '' : String(val);
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function allCsv() {
+    var head = ['Date', 'Time', 'Seizures', 'Severity', 'Duration (sec)', 'Symptoms', 'Description', 'Location', 'Triggers', 'Warning signs', 'Improved with', 'Stopped by me', 'Impact on day', 'Impact on others', 'Notes'];
+    var rows = entries.slice().sort(function (a, b) { return a.at - b.at; }).map(function (e) {
+      var d = new Date(e.at);
+      return [dayKey(e.at), pad(d.getHours()) + ':' + pad(d.getMinutes()), e.count || 1, e.severity ? SEV[e.severity] : '', e.duration == null ? '' : e.duration,
+        (e.symptoms || []).join('; '), e.description, e.location, (e.triggers || []).join('; '), (e.precursors || []).join('; '), (e.improved || []).join('; '),
+        e.stopped ? 'Yes' : '', impactText(e.dayImpact), impactText(e.othersImpact), e.notes].map(csvCell).join(',');
+    });
+    return [head.map(csvCell).join(',')].concat(rows).join('\r\n');
+  }
+  function downloadCsv() {
+    if (!entries.length) { toast('Nothing to download yet.'); return; }
+    var blob = new Blob(['﻿' + allCsv()], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = el('a', { href: url, download: 'seizure-log-' + dayKey(Date.now()) + '.csv' });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function afterEntriesChanged() {
+    var sig = ['symptoms', 'triggers', 'precursors', 'improved', 'location'].map(function (k) { return topFrom(k).join('|'); }).join('||');
+    if (sig !== optionSig) { optionSig = sig; renderAllChips(); }
+    var view = currentView();
+    if (view === 'history') renderHistory();
+    if (view === 'report') renderReport();
+    if (view === 'setup') renderSetup();
+    updateSyncUI();
+  }
+
+  /* ---------- chips ---------- */
+  function topFrom(field, max) {
+    var c = {};
+    entries.forEach(function (e) {
+      [].concat(e[field] == null ? [] : e[field]).forEach(function (x) { if (x) c[x] = (c[x] || 0) + 1; });
+    });
+    return Object.keys(c).sort(function (a, b) { return c[b] - c[a]; }).slice(0, max || 10);
+  }
+  function optionsFor(key) {
+    var seen = {}, out = [];
+    var extra = key === 'location' ? [] : Array.from(form[key]);
+    DEFAULTS[key].concat(topFrom(key), extra).forEach(function (x) {
+      var k = x.toLowerCase();
+      if (!seen[k]) { seen[k] = 1; out.push(x); }
+    });
+    return out;
+  }
+  function renderChips(key) {
+    var root = $('#chips-' + key);
+    root.replaceChildren.apply(root, optionsFor(key).map(function (x) {
+      if (key === 'location') {
+        return el('button', {
+          type: 'button', class: 'chip', 'aria-pressed': String(v('#f-location').trim().toLowerCase() === x.toLowerCase()),
+          onclick: function () { $('#f-location').value = x; refreshLocationChips(); updateSummaries(); }
+        }, x);
+      }
+      return el('button', {
+        type: 'button', class: 'chip', 'aria-pressed': String(form[key].has(x)),
+        onclick: function (ev) {
+          if (form[key].has(x)) form[key].delete(x); else form[key].add(x);
+          ev.currentTarget.setAttribute('aria-pressed', String(form[key].has(x)));
+          updateSummaries();
+        }
+      }, x);
+    }));
+  }
+  function refreshLocationChips() {
+    var cur = v('#f-location').trim().toLowerCase();
+    $$('#chips-location .chip').forEach(function (b) { b.setAttribute('aria-pressed', String(b.textContent.toLowerCase() === cur)); });
+  }
+  function renderAllChips() { ['symptoms', 'triggers', 'precursors', 'improved', 'location'].forEach(renderChips); }
+
+  function addCustom(key) {
+    var input = $('#add-' + key);
+    var text = input.value.trim();
+    if (!text) return;
+    var existing = optionsFor(key).filter(function (o) { return o.toLowerCase() === text.toLowerCase(); })[0];
+    form[key].add(existing || text);
+    input.value = '';
+    renderChips(key);
+    updateSummaries();
+  }
+
+  /* ---------- duration ---------- */
+  function renderDurChips() {
+    var root = $('#dur-chips');
+    root.replaceChildren.apply(root, DUR_CHIPS.map(function (d) {
+      return el('button', {
+        type: 'button', class: 'chip', 'data-s': d[0], 'aria-pressed': String(form.dur === d[0]),
+        onclick: function () {
+          form.dur = form.dur === d[0] ? null : d[0];
+          $('#f-dur-n').value = '';
+          refreshDurChips();
+        }
+      }, d[1]);
+    }));
+  }
+  function refreshDurChips() {
+    $$('#dur-chips .chip').forEach(function (b) { b.setAttribute('aria-pressed', String(form.dur === Number(b.dataset.s))); });
+  }
+  function onCustomDur() {
+    var n = parseFloat($('#f-dur-n').value);
+    if (isFinite(n) && n > 0) form.dur = Math.round($('#f-dur-u').value === 'min' ? n * 60 : n);
+    else form.dur = null;
+    refreshDurChips();
+  }
+
+  /* ---------- form wiring ---------- */
+  function setSeverity(n) {
+    form.severity = form.severity === n ? null : n;
+    $$('#sev-group .seg').forEach(function (b) { b.setAttribute('aria-pressed', String(Number(b.dataset.sev) === form.severity)); });
+  }
+  function setLevel(group, val) {
+    var k = group === 'day' ? 'dayLevel' : 'othersLevel';
+    form[k] = form[k] === val ? null : val;
+    $$('.opt[data-group="' + group + '"]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.v === form[k])); });
+    updateSummaries();
+  }
+  function setCount(n) {
+    form.count = Math.max(1, Math.min(99, n));
+    $('#cnt-val').textContent = String(form.count);
+  }
+  function setStopped(b) {
+    form.stopped = b;
+    $('#f-stopped').setAttribute('aria-pressed', String(b));
+    updateSummaries();
+  }
+  function sum(id, parts) {
+    var t = parts.filter(Boolean).join(' · ');
+    $('#sum-' + id).textContent = t || 'Optional';
+  }
+  function updateSummaries() {
+    sum('what', [form.symptoms.size ? plural(form.symptoms.size, 'symptom') : '', v('#f-desc').trim() ? 'Described' : '', v('#f-location').trim()]);
+    sum('signs', [form.triggers.size ? plural(form.triggers.size, 'trigger') : '', form.precursors.size ? plural(form.precursors.size, 'warning sign') : '']);
+    sum('help', [form.stopped ? 'Stopped it' : '', form.improved.size ? plural(form.improved.size, 'thing') + ' helped' : '']);
+    sum('impact', [form.dayLevel ? 'Day: ' + LEVEL[form.dayLevel] : '', form.othersLevel ? 'Others: ' + LEVEL[form.othersLevel] : '']);
+    sum('notes', [v('#f-notes').trim() ? 'Added' : '']);
+  }
+
+  function setWhenNow() { $('#f-when').value = toInputValue(Date.now()); }
+
+  function resetForm() {
+    form = freshForm();
+    editingId = null;
+    whenTouched = false;
+    setWhenNow();
+    ['#f-desc', '#f-location', '#f-notes', '#f-day-note', '#f-others-note', '#f-dur-n', '#add-symptoms', '#add-triggers', '#add-precursors', '#add-improved'].forEach(function (s) { $(s).value = ''; });
+    $('#f-dur-u').value = 'min';
+    $$('#entry-form details.sec').forEach(function (d) { d.open = false; });
+    $$('#sev-group .seg').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+    $$('.opt').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+    $('#f-stopped').setAttribute('aria-pressed', 'false');
+    $('#cnt-val').textContent = '1';
+    renderDurChips();
+    renderAllChips();
+    updateSummaries();
+    $('#edit-note').hidden = true;
+    $('#btn-cancel').hidden = true;
+    $('#btn-save').textContent = 'Save seizure';
+    $$('.partial').forEach(function (p) { p.textContent = ''; });
+  }
+
+  function fillForm(e) {
+    $('#f-when').value = toInputValue(e.at);
+    form.severity = e.severity || null;
+    $$('#sev-group .seg').forEach(function (b) { b.setAttribute('aria-pressed', String(Number(b.dataset.sev) === form.severity)); });
+    form.dur = e.duration == null ? null : e.duration;
+    refreshDurChips();
+    if (form.dur != null && !DUR_CHIPS.some(function (d) { return d[0] === form.dur; })) {
+      if (form.dur >= 60 && form.dur % 60 === 0) { $('#f-dur-n').value = form.dur / 60; $('#f-dur-u').value = 'min'; }
+      else { $('#f-dur-n').value = form.dur; $('#f-dur-u').value = 'sec'; }
+    }
+    setCount(e.count || 1);
+    $('#f-desc').value = e.description || '';
+    $('#f-location').value = e.location || '';
+    ['symptoms', 'triggers', 'precursors', 'improved'].forEach(function (k) { form[k] = new Set(e[k] || []); });
+    setStopped(!!e.stopped);
+    if (e.dayImpact) { form.dayLevel = e.dayImpact.level || null; $('#f-day-note').value = e.dayImpact.note || ''; }
+    if (e.othersImpact) { form.othersLevel = e.othersImpact.level || null; $('#f-others-note').value = e.othersImpact.note || ''; }
+    $$('.opt').forEach(function (b) {
+      var k = b.dataset.group === 'day' ? 'dayLevel' : 'othersLevel';
+      b.setAttribute('aria-pressed', String(b.dataset.v === form[k]));
+    });
+    $('#f-notes').value = e.notes || '';
+    renderAllChips();
+    updateSummaries();
+    $('#sec-what').open = !!(e.description || e.location || (e.symptoms || []).length);
+    $('#sec-signs').open = !!((e.triggers || []).length || (e.precursors || []).length);
+    $('#sec-help').open = !!(e.stopped || (e.improved || []).length);
+    $('#sec-impact').open = !!(form.dayLevel || form.othersLevel || v('#f-day-note') || v('#f-others-note'));
+    $('#sec-notes').open = !!e.notes;
+  }
+
+  function loadForm(e) {
+    resetForm();
+    editingId = e.id;
+    whenTouched = true;
+    fillForm(e);
+    var note = $('#edit-note');
+    note.textContent = 'Editing the entry from ' + fmtLong(e.at) + ' at ' + fmtTime(e.at);
+    note.hidden = false;
+    $('#btn-cancel').hidden = false;
+    $('#btn-save').textContent = 'Save changes';
+  }
+
+  function collect() {
+    var at = new Date($('#f-when').value).getTime();
+    if (!isFinite(at)) return null;
+    var existing = editingId ? entries.filter(function (e) { return e.id === editingId; })[0] : null;
+    var dayNote = v('#f-day-note').trim(), othersNote = v('#f-others-note').trim();
+    return {
+      at: at,
+      count: form.count,
+      severity: form.severity,
+      duration: form.dur,
+      description: v('#f-desc').trim(),
+      location: v('#f-location').trim(),
+      symptoms: Array.from(form.symptoms),
+      triggers: Array.from(form.triggers),
+      precursors: Array.from(form.precursors),
+      improved: Array.from(form.improved),
+      stopped: form.stopped,
+      dayImpact: (form.dayLevel || dayNote) ? { level: form.dayLevel, note: dayNote } : null,
+      othersImpact: (form.othersLevel || othersNote) ? { level: form.othersLevel, note: othersNote } : null,
+      notes: v('#f-notes').trim(),
+      created: existing && existing.created ? existing.created : Date.now(),
+      updated: Date.now()
+    };
+  }
+
+  function save() {
+    if (!backend) { toast('Still connecting to storage. Try again in a moment.'); return; }
+    var data = collect();
+    if (!data) { toast('Pick a valid date and time first.'); return; }
+    var btn = $('#btn-save');
+    var wasEditing = !!editingId;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    backend.save(editingId, data).then(function () {
+      var label = fmtTime(data.at) + (data.severity ? ', ' + SEV[data.severity].toLowerCase() : '');
+      if (!wasEditing) clearDraft();
+      resetForm();
+      if (wasEditing) restoreDraft();
+      toast(wasEditing ? 'Changes saved.' : 'Saved: ' + label);
+      if (wasEditing) go('history');
+    }).catch(function (err) {
+      toast(errMsg(err));
+      btn.textContent = editingId ? 'Save changes' : 'Save seizure';
+    }).then(function () { btn.disabled = false; });
+  }
+
+  /* ---------- entry formatting ---------- */
+  function impactText(i) {
+    if (!i) return '';
+    return [i.level ? LEVEL[i.level] : '', i.note].filter(Boolean).join(' — ');
+  }
+  function rowsOf(e) {
+    var r = [];
+    if ((e.count || 1) > 1) r.push(['Seizures', String(e.count)]);
+    if (e.severity) r.push(['Severity', e.severity + ' (' + SEV[e.severity] + ')']);
+    if (e.duration != null) r.push(['Duration', fmtDur(e.duration)]);
+    if ((e.symptoms || []).length) r.push(['Symptoms', e.symptoms.join(', ')]);
+    if (e.description) r.push(['Description', e.description]);
+    if (e.location) r.push(['Location', e.location]);
+    if ((e.triggers || []).length) r.push(['Triggers', e.triggers.join(', ')]);
+    if ((e.precursors || []).length) r.push(['Warning signs', e.precursors.join(', ')]);
+    if ((e.improved || []).length) r.push(['Improved with', e.improved.join(', ')]);
+    if (e.stopped) r.push(['Stopped by me', 'Yes *']);
+    if (impactText(e.dayImpact)) r.push(['Impact on your day', impactText(e.dayImpact)]);
+    if (impactText(e.othersImpact)) r.push(['Impact on others', impactText(e.othersImpact)]);
+    if (e.notes) r.push(['Notes', e.notes]);
+    return r;
+  }
+  function rowsDl(e, skip) {
+    var rows = rowsOf(e).filter(function (r) { return !skip || skip.indexOf(r[0]) < 0; });
+    if (!rows.length) return skip ? null : el('p', { class: 'hint' }, 'Only the time was recorded.');
+    var dl = el('dl', { class: 'rows' });
+    rows.forEach(function (r) { dl.append(el('dt', {}, r[0]), el('dd', {}, r[1])); });
+    return dl;
+  }
+  function pillFor(e) {
+    return e.severity ? el('span', { class: 'pill s' + e.severity }, SEV[e.severity]) : el('span', { class: 'pill neutral' }, 'Not rated');
+  }
+
+  /* ---------- history ---------- */
+  function renderHistory() {
+    var list = $('#history-list');
+    var stats = $('#stats');
+    var sorted = entries.slice().sort(function (a, b) { return b.at - a.at; });
+    var now = Date.now(), today = startOfDay(now);
+    var since = function (from) { return sumCounts(entries.filter(function (e) { return e.at >= from && e.at <= now; })); };
+    var last = sorted.filter(function (e) { return e.at <= now; })[0];
+    var lastText = '—';
+    if (last) {
+      var d = Math.round((today - startOfDay(last.at)) / 864e5);
+      lastText = d === 0 ? 'Today' : plural(d, 'day') + ' ago';
+    }
+    function stat(k, val) { return el('div', { class: 'stat' }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, val)); }
+    stats.replaceChildren(stat('Today', String(since(today))), stat('Last 7 days', String(since(addDays(today, -6)))), stat('Last 30 days', String(since(addDays(today, -29)))), stat('Most recent', lastText));
+
+    if (!loaded) { list.replaceChildren(el('div', { class: 'empty' }, 'Loading your entries…')); return; }
+    if (!sorted.length) {
+      list.replaceChildren(el('div', { class: 'empty' }, el('strong', {}, 'No seizures logged yet'), 'Entries you save on the Log tab appear here, newest first.'));
+      return;
+    }
+    var nodes = [], curKey = null, count = 0, header = null;
+    sorted.forEach(function (e) {
+      var k = dayKey(e.at);
+      if (k !== curKey) {
+        curKey = k;
+        header = el('div', { class: 'day-h' }, el('span', {}, fmtDay(e.at)), el('span', {}));
+        nodes.push(header);
+        count = 0;
+      }
+      count += (e.count || 1);
+      header.lastChild.textContent = plural(count, 'seizure');
+      nodes.push(entryCard(e));
+    });
+    list.replaceChildren.apply(list, nodes);
+  }
+
+  function entryCard(e) {
+    var open = !!expanded[e.id];
+    var body = el('div', { class: 'entry-body', hidden: !open });
+    var head = el('button', {
+      type: 'button', class: 'entry-head', 'aria-expanded': String(open),
+      onclick: function () {
+        expanded[e.id] = !expanded[e.id];
+        head.setAttribute('aria-expanded', String(!!expanded[e.id]));
+        body.hidden = !expanded[e.id];
+      }
+    },
+      el('span', { class: 'entry-top' },
+        el('span', { class: 'time' }, fmtTime(e.at)),
+        pillFor(e),
+        e.duration != null ? el('span', { class: 'meta' }, fmtDur(e.duration)) : null,
+        (e.count || 1) > 1 ? el('span', { class: 'meta' }, '×' + e.count) : null,
+        e.stopped ? el('span', { class: 'meta', title: 'Stopped by me' }, 'Stopped *') : null,
+        pendingIds()[e.id] ? el('span', { class: 'pill pending' }, 'Not synced yet') : null
+      ),
+      e.description ? el('span', { class: 'snip' }, e.description) : null
+    );
+    var armed = false, t;
+    var del = el('button', { type: 'button', class: 'btn ghost danger' }, 'Delete');
+    del.addEventListener('click', function () {
+      if (!armed) {
+        armed = true; del.textContent = 'Tap again to delete';
+        t = setTimeout(function () { armed = false; del.textContent = 'Delete'; }, 4000);
+        return;
+      }
+      clearTimeout(t);
+      del.disabled = true;
+      backend.remove(e.id).then(function () { toast('Entry deleted.'); }).catch(function (err) { del.disabled = false; toast(errMsg(err)); });
+    });
+    body.append(rowsDl(e), el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn ghost', onclick: function () { loadForm(e); go('log'); } }, 'Edit'), del));
+    return el('article', { class: 'entry' }, head, body);
+  }
+
+  /* ---------- report ---------- */
+  function weekEntries(ws) {
+    var we = addDays(ws, 7);
+    return entries.filter(function (e) { return e.at >= ws && e.at < we; }).sort(function (a, b) { return a.at - b.at; });
+  }
+  function renderReport() {
+    var ws = weekStart, we6 = addDays(ws, 6);
+    $('#wk-label').textContent = fmtShort(ws) + ' – ' + fmtShort(we6) + ', ' + new Date(we6).getFullYear();
+    $('#wk-next').disabled = ws >= startOfWeek(Date.now());
+    var list = weekEntries(ws);
+    var total = sumCounts(list);
+    var stopped = list.filter(function (e) { return e.stopped; }).length;
+    var by = { 1: 0, 2: 0, 3: 0, 0: 0 };
+    list.forEach(function (e) { by[e.severity || 0] += (e.count || 1); });
+    var sumline = $('#wk-sum');
+    var pills = [el('span', { class: 'pill neutral' }, 'Total ' + total)];
+    [1, 2, 3].forEach(function (s) { if (by[s]) pills.push(el('span', { class: 'pill s' + s }, SEV[s] + ' ' + by[s])); });
+    if (by[0]) pills.push(el('span', { class: 'pill neutral' }, 'Not rated ' + by[0]));
+    if (stopped) pills.push(el('span', { class: 'pill neutral' }, 'Stopped by me ' + stopped));
+    sumline.replaceChildren.apply(sumline, pills);
+
+    var days = [];
+    for (var i = 0; i < 7; i++) {
+      var ds = addDays(ws, i);
+      var de = addDays(ws, i + 1);
+      var dayList = list.filter(function (e) { return e.at >= ds && e.at < de; });
+      var n = sumCounts(dayList);
+      var card = el('section', { class: 'day' },
+        el('h3', {}, el('span', {}, new Date(ds).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })), el('span', { class: 'n' }, 'Day ' + (i + 1) + ' · ' + (n ? plural(n, 'seizure') : 'none logged')))
+      );
+      dayList.forEach(function (e) {
+        card.append(el('div', { class: 'rep-entry' },
+          el('div', { class: 'entry-top' }, el('span', { class: 'time' }, fmtTime(e.at)), pillFor(e), e.duration != null ? el('span', { class: 'meta' }, fmtDur(e.duration)) : null),
+          rowsDl(e, ['Severity', 'Duration'])));
+      });
+      days.push(card);
+    }
+    var wd = $('#wk-days');
+    wd.replaceChildren.apply(wd, days);
+    $('#copy-box').hidden = true;
+  }
+
+  function weekText(ws) {
+    var list = weekEntries(ws);
+    var lines = [];
+    lines.push('SEIZURE LOG — week of ' + fmtLong(ws) + ' to ' + fmtLong(addDays(ws, 6)));
+    var total = sumCounts(list), stopped = list.filter(function (e) { return e.stopped; }).length;
+    lines.push('Total seizures: ' + total + (stopped ? ' (stopped by me: ' + stopped + ')' : ''));
+    for (var i = 0; i < 7; i++) {
+      var ds = addDays(ws, i), de = addDays(ws, i + 1);
+      var dayList = list.filter(function (e) { return e.at >= ds && e.at < de; });
+      lines.push('');
+      lines.push(new Date(ds).toLocaleDateString([], { weekday: 'long', month: 'numeric', day: 'numeric' }).toUpperCase() + ' (Day ' + (i + 1) + ')');
+      if (!dayList.length) { lines.push('  None logged'); continue; }
+      dayList.forEach(function (e) {
+        lines.push('  ' + fmtTime(e.at));
+        rowsOf(e).forEach(function (r) { lines.push('    ' + r[0] + ': ' + r[1].replace(/\n/g, ' ')); });
+      });
+    }
+    return lines.join('\n');
+  }
+
+  function copyWeek() {
+    var text = weekText(weekStart);
+    var box = $('#copy-box');
+    function fallback() { box.value = text; box.hidden = false; box.focus(); box.select(); toast('Select the text below and copy it.'); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast('Week copied.'); }, fallback);
+    } else fallback();
+  }
+
+  /* ---------- routing ---------- */
+  var VIEWS = ['log', 'history', 'report', 'setup'];
+  function currentView() { var h = location.hash.slice(1); return VIEWS.indexOf(h) >= 0 ? h : 'log'; }
+  function go(view) { if (location.hash === '#' + view) route(); else location.hash = '#' + view; }
+  function route() {
+    var cur = currentView();
+    VIEWS.forEach(function (n) { $('#view-' + n).hidden = n !== cur; });
+    $$('.tabs a').forEach(function (a) { if (a.dataset.view === cur) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    if (cur === 'log' && !whenTouched && !editingId) setWhenNow();
+    if (cur === 'history') renderHistory();
+    if (cur === 'report') renderReport();
+    if (cur === 'setup') renderSetup();
+    window.scrollTo(0, 0);
+  }
+
+  /* ---------- events ---------- */
+  $('#entry-form').addEventListener('submit', function (ev) { ev.preventDefault(); save(); });
+  $('#entry-form').addEventListener('keydown', function (ev) {
+    var t = ev.target;
+    if (ev.key === 'Enter' && t.tagName === 'INPUT') {
+      ev.preventDefault();
+      if (t.id.indexOf('add-') === 0) addCustom(t.id.slice(4));
+    }
+  });
+  $('#entry-form').addEventListener('input', function (ev) {
+    if (ev.target.id === 'f-when') whenTouched = true;
+    if (ev.target.id === 'f-dur-n' || ev.target.id === 'f-dur-u') onCustomDur();
+    if (ev.target.id === 'f-location') refreshLocationChips();
+    updateSummaries();
+  });
+  $$('#when-quick .chip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $('#f-when').value = toInputValue(Date.now() - Number(b.dataset.off) * 60000);
+      whenTouched = Number(b.dataset.off) > 0;
+    });
+  });
+  $$('#sev-group .seg').forEach(function (b) { b.addEventListener('click', function () { setSeverity(Number(b.dataset.sev)); }); });
+  $$('.opt').forEach(function (b) { b.addEventListener('click', function () { setLevel(b.dataset.group, b.dataset.v); }); });
+  $$('[data-add]').forEach(function (b) { b.addEventListener('click', function () { addCustom(b.dataset.add); }); });
+  $('#cnt-minus').addEventListener('click', function () { setCount(form.count - 1); });
+  $('#cnt-plus').addEventListener('click', function () { setCount(form.count + 1); });
+  $('#f-stopped').addEventListener('click', function () { setStopped(!form.stopped); });
+  $('#btn-cancel').addEventListener('click', function () { resetForm(); restoreDraft(); go('history'); });
+  $('#entry-form').addEventListener('input', scheduleDraft);
+  $('#entry-form').addEventListener('click', scheduleDraft);
+  $('#btn-sync').addEventListener('click', function () { flush(); });
+  $('#btn-csv').addEventListener('click', downloadCsv);
+  $('#btn-cfg-save').addEventListener('click', saveSetup);
+  $('#btn-cfg-forget').addEventListener('click', forgetSetup);
+  $('#btn-cfg-show').addEventListener('click', function (ev) {
+    var k = $('#cfg-key'), show = k.type === 'password';
+    k.type = show ? 'text' : 'password';
+    ev.currentTarget.textContent = show ? 'Hide key' : 'Show key';
+    ev.currentTarget.setAttribute('aria-pressed', String(show));
+  });
+  $('#wk-prev').addEventListener('click', function () { weekStart = addDays(weekStart, -7); renderReport(); });
+  $('#wk-next').addEventListener('click', function () { weekStart = addDays(weekStart, 7); renderReport(); });
+  $('#btn-this-week').addEventListener('click', function () { weekStart = startOfWeek(Date.now()); renderReport(); });
+  $('#btn-copy').addEventListener('click', copyWeek);
+  window.addEventListener('hashchange', route);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && currentView() === 'log' && !whenTouched && !editingId) setWhenNow();
+  });
+
+  /* ---------- start ---------- */
+  resetForm();
+  var restored = restoreDraft();
+  route();
+  initStore();
+  if (restored) toast('Restored the entry you had not saved yet.');
+  window.addEventListener('online', function () { flush(); });
+  window.addEventListener('pagehide', saveDraft);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { saveDraft(); return; }
+    if (outbox.length || Date.now() - lastSync > 30000) flush();
+  });
+  setInterval(function () { if (outbox.length && !document.hidden) flush(); }, 60000);
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+})();
+</script>
+</body>
+</html>
