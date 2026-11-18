@@ -21,6 +21,7 @@ var COLS = [
 ];
 var SEP = ' | ';
 var KEY_PROP = 'APP_KEY';
+var PREFS_PROP = 'APP_PREFS';
 
 /* ---------------- web entry points ---------------- */
 
@@ -47,6 +48,7 @@ function doPost(e) {
       case 'list': return json_({ ok: true, data: listEntries_() });
       case 'save': return json_({ ok: true, data: saveEntry_(req.entry) });
       case 'remove': return json_({ ok: true, data: removeEntry_(req.id) });
+      case 'prefs': return json_({ ok: true, data: prefs_(req.prefs) });
       default: return json_({ ok: false, error: 'unknown action' });
     }
   } catch (err) {
@@ -71,6 +73,31 @@ function createAppKey() {
   PropertiesService.getScriptProperties().setProperty(KEY_PROP, key);
   Logger.log('New app key (paste it into the app\'s Setup tab): ' + key);
   Logger.log('Any device using an older key will need this new one.');
+}
+
+/**
+ * App preferences shared by all devices (chips removed from lists, custom time
+ * shortcuts). Stored in Script Properties. Pass a newer copy to replace the
+ * stored one; always returns the stored copy.
+ */
+function prefs_(incoming) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var cur = null;
+    try { cur = JSON.parse(props.getProperty(PREFS_PROP) || 'null'); } catch (e) { cur = null; }
+    if (incoming && typeof incoming === 'object' && isFinite(Number(incoming.updated)) &&
+        (!cur || Number(incoming.updated) > Number(cur.updated || 0))) {
+      var text = JSON.stringify(incoming);
+      if (text.length > 8000) throw new Error('Settings are too large.');
+      props.setProperty(PREFS_PROP, text);
+      cur = incoming;
+    }
+    return cur;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ---------------- functions for Index.html (owner only) ---------------- */

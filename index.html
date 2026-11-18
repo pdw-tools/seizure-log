@@ -109,6 +109,7 @@ textarea { min-height: 128px; resize: vertical; }
 .chip-tool { min-height: 46px; padding: 0 10px; background: none; border: 0; font: inherit; font-weight: 700; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .chip-tool.done { text-decoration: none; border: 2px solid var(--accent); border-radius: 999px; padding: 0 16px; }
 .chip-hint { flex-basis: 100%; margin: 0; }
+.when-add { flex-basis: 100%; }
 
 /* severity */
 .seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -237,12 +238,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
     <form id="entry-form" novalidate autocomplete="off">
       <div class="card">
         <h3>When</h3>
-        <div class="row" id="when-quick">
-          <button type="button" class="chip" data-off="0">Just now</button>
-          <button type="button" class="chip" data-off="15">15 min ago</button>
-          <button type="button" class="chip" data-off="60">1 hour ago</button>
-          <button type="button" class="chip" data-off="180">3 hours ago</button>
-        </div>
+        <div class="row" id="chips-when" role="group" aria-label="How long ago"></div>
         <div>
           <label class="lbl" for="f-when">Date and time</label>
           <input class="inp" type="datetime-local" id="f-when">
@@ -514,7 +510,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
   function errMsg() {
     return 'Could not save on this device. Your entry is still on screen.';
   }
-  var APP_VERSION = '2';
+  var APP_VERSION = '3';
 
   /* ---------- state ---------- */
   var entries = [];
@@ -535,12 +531,55 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
   // Every change is written to this device immediately and queued in an outbox.
   // The outbox is sent to the Apps Script API whenever a connection is available,
   // so nothing is lost if the network drops or the app is closed mid-save.
-  var K = { entries: 'sl.entries', outbox: 'sl.outbox', config: 'sl.config', sheet: 'sl.sheetUrl', lastSync: 'sl.lastSync', draft: 'sl.draft', hidden: 'sl.hiddenChips' };
+  var K = { entries: 'sl.entries', outbox: 'sl.outbox', config: 'sl.config', sheet: 'sl.sheetUrl', lastSync: 'sl.lastSync', draft: 'sl.draft', hidden: 'sl.hiddenChips', prefs: 'sl.prefs', prefsDirty: 'sl.prefsDirty' };
   var store = {
     get: function (k) { try { var x = localStorage.getItem(k); return x == null ? null : JSON.parse(x); } catch (e) { return null; } },
     set: function (k, val) { try { localStorage.setItem(k, JSON.stringify(val)); return true; } catch (e) { return false; } },
     remove: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
   };
+  /* ---------- preferences synced through the Sheet ---------- */
+  // Removed chips and custom "When" shortcuts. Kept on the device and sent to
+  // the Apps Script 'prefs' action; whichever copy was changed last wins.
+  var prefs = loadPrefs();
+  var prefsDirty = !!store.get(K.prefsDirty);
+  var prefsUnsupported = false;
+  function loadPrefs() {
+    var p = store.get(K.prefs);
+    if (!p) {
+      // Move chips removed before syncing existed into synced preferences.
+      p = { hidden: store.get(K.hidden) || {}, when: [], updated: 0 };
+      if (Object.keys(p.hidden).length) { p.updated = Date.now(); store.set(K.prefsDirty, true); }
+      store.set(K.prefs, p);
+    }
+    p.hidden = p.hidden || {};
+    p.when = p.when || [];
+    return p;
+  }
+  function changePrefs(fn) {
+    fn(prefs);
+    prefs.updated = Date.now();
+    prefsDirty = true;
+    store.set(K.prefs, prefs);
+    store.set(K.prefsDirty, true);
+    flush();
+  }
+  function syncPrefs() {
+    if (prefsUnsupported) return Promise.resolve();
+    var sent = prefsDirty ? JSON.parse(JSON.stringify(prefs)) : null;
+    return api('prefs', sent ? { prefs: sent } : {}).then(function (server) {
+      if (sent && prefs.updated === sent.updated) { prefsDirty = false; store.set(K.prefsDirty, false); }
+      if (server && !prefsDirty && Number(server.updated || 0) > Number(prefs.updated || 0)) {
+        prefs = { hidden: server.hidden || {}, when: server.when || [], updated: Number(server.updated) };
+        store.set(K.prefs, prefs);
+        renderAllChips();
+      }
+    }).catch(function (err) {
+      // An Apps Script deployment from before this feature: keep lists on this device.
+      if (err.code === 'server' && /unknown action/.test(err.message)) { prefsUnsupported = true; return; }
+      throw err;
+    });
+  }
+
   var outbox = [];
   var config = null;
   var syncing = false, resyncWanted = false, lastSync = 0, syncError = null;
@@ -617,7 +656,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
         return next();
       });
     }
-    return next().then(pull).then(function () {
+    return next().then(pull).then(syncPrefs).then(function () {
       syncError = null; lastSync = Date.now(); store.set(K.lastSync, lastSync);
     }).catch(function (err) {
       syncError = err.code || 'error';
@@ -807,8 +846,8 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
   // Chips the person removed from a list, per group, stored on this device.
   // Removing a chip only hides it from the list; past entries keep it.
   var chipEdit = {}, chipShowRemoved = {};
-  function removedList(key) { var h = store.get(K.hidden) || {}; return h[key] || []; }
-  function setRemoved(key, list) { var h = store.get(K.hidden) || {}; h[key] = list; store.set(K.hidden, h); }
+  function removedList(key) { return (prefs.hidden[key] || []).slice(); }
+  function setRemoved(key, list) { changePrefs(function (p) { p.hidden[key] = list; }); }
   function isRemoved(key, x) { return removedList(key).indexOf(x.toLowerCase()) >= 0; }
   function unremove(key, x) { setRemoved(key, removedList(key).filter(function (k) { return k !== x.toLowerCase(); })); }
   function isChosen(key, x) {
@@ -888,9 +927,88 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
     var cur = v('#f-location').trim().toLowerCase();
     $$('#chips-location .chip:not(.removable):not(.restorable)').forEach(function (b) { b.setAttribute('aria-pressed', String(b.textContent.toLowerCase() === cur)); });
   }
-  function renderAllChips() { ['symptoms', 'triggers', 'precursors', 'improved', 'location'].forEach(renderChips); }
+  function renderAllChips() { ['symptoms', 'triggers', 'precursors', 'improved', 'location'].forEach(renderChips); renderWhenChips(); }
+
+  /* ---------- "When" shortcuts ---------- */
+  var WHEN_DEFAULTS = [0, 1, 2, 5, 10, 15, 30, 45, 60, 120, 180];
+  var whenChosen = null;
+  function whenLabel(m) {
+    if (m === 0) return 'Just now';
+    if (m < 60) return m + ' min ago';
+    var h = Math.floor(m / 60), r = m % 60;
+    return h + ' hr' + (r ? ' ' + r + ' min' : '') + ' ago';
+  }
+  function whenOptions(includeRemoved) {
+    var all = WHEN_DEFAULTS.concat(prefs.when || [])
+      .filter(function (m, i, a) { return a.indexOf(m) === i; })
+      .sort(function (a, b) { return a - b; });
+    return includeRemoved ? all : all.filter(function (m) { return !isRemoved('when', String(m)); });
+  }
+  function pickWhen(m) {
+    $('#f-when').value = toInputValue(Date.now() - m * 60000);
+    whenTouched = m > 0;
+    whenChosen = m;
+    refreshWhenChips();
+    scheduleDraft();
+  }
+  function refreshWhenChips() {
+    $$('#chips-when .chip[data-min]:not(.removable):not(.restorable)').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.min) === whenChosen));
+    });
+  }
+  function renderWhenChips() {
+    var root = $('#chips-when'), kids;
+    if (!chipEdit.when) {
+      kids = whenOptions().map(function (m) {
+        return el('button', { type: 'button', class: 'chip', 'data-min': String(m), 'aria-pressed': String(m === whenChosen),
+          onclick: function () { pickWhen(m); } }, whenLabel(m));
+      });
+      kids.push(chipTool('Edit list', function () { chipEdit.when = true; renderWhenChips(); }, { 'aria-label': 'Edit the time shortcuts' }));
+    } else {
+      var removed = whenOptions(true).filter(function (m) { return isRemoved('when', String(m)); });
+      kids = [el('p', { class: 'hint chip-hint' }, 'Tap a shortcut to remove it, or add your own below.')];
+      whenOptions().forEach(function (m) {
+        kids.push(el('button', { type: 'button', class: 'chip removable', 'data-min': String(m), 'aria-label': 'Remove ' + whenLabel(m),
+          onclick: function () {
+            changePrefs(function (p) { var l = p.hidden.when || []; if (l.indexOf(String(m)) < 0) l.push(String(m)); p.hidden.when = l; });
+            if (whenChosen === m) whenChosen = null;
+            renderWhenChips();
+            toast('Removed “' + whenLabel(m) + '”.');
+          } }, whenLabel(m)));
+      });
+      if (chipShowRemoved.when) {
+        removed.forEach(function (m) {
+          kids.push(el('button', { type: 'button', class: 'chip restorable', 'data-min': String(m), 'aria-label': 'Put back ' + whenLabel(m),
+            onclick: function () { unremove('when', String(m)); renderWhenChips(); toast('Put “' + whenLabel(m) + '” back.'); } }, whenLabel(m)));
+        });
+      }
+      if (removed.length) {
+        kids.push(chipTool(chipShowRemoved.when ? 'Hide removed' : 'Show removed (' + removed.length + ')',
+          function () { chipShowRemoved.when = !chipShowRemoved.when; renderWhenChips(); }));
+      }
+      kids.push(el('div', { class: 'add-row when-add' },
+        el('input', { class: 'inp', type: 'number', inputmode: 'numeric', min: '1', max: '1440', step: '1', id: 'add-when',
+          placeholder: 'Minutes ago', 'aria-label': 'Add a shortcut, in minutes ago' }),
+        el('button', { type: 'button', class: 'btn ghost', onclick: addWhen }, 'Add')));
+      kids.push(chipTool('Done', function () { chipEdit.when = false; chipShowRemoved.when = false; renderWhenChips(); }, { class: 'chip-tool done' }));
+    }
+    root.replaceChildren.apply(root, kids);
+  }
+  function addWhen() {
+    var input = $('#add-when');
+    if (!input) return;
+    var m = Math.round(Number(input.value));
+    if (!input.value || !isFinite(m) || m < 1 || m > 1440) { toast('Enter a number of minutes from 1 to 1440.'); return; }
+    changePrefs(function (p) {
+      if (WHEN_DEFAULTS.indexOf(m) < 0 && p.when.indexOf(m) < 0) p.when.push(m);
+      p.hidden.when = (p.hidden.when || []).filter(function (k) { return k !== String(m); });
+    });
+    renderWhenChips();
+    toast('Added “' + whenLabel(m) + '”.');
+  }
 
   function addCustom(key) {
+    if (key === 'when') { addWhen(); return; }
     var input = $('#add-' + key);
     var text = input.value.trim();
     if (!text) return;
@@ -964,6 +1082,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
     form = freshForm();
     editingId = null;
     whenTouched = false;
+    whenChosen = null;
     setWhenNow();
     ['#f-desc', '#f-location', '#f-notes', '#f-day-note', '#f-others-note', '#f-dur-n', '#add-symptoms', '#add-triggers', '#add-precursors', '#add-improved'].forEach(function (s) { $(s).value = ''; });
     $('#f-dur-u').value = 'min';
@@ -983,6 +1102,7 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
 
   function fillForm(e) {
     $('#f-when').value = toInputValue(e.at);
+    whenChosen = null;
     form.severity = e.severity || null;
     $$('#sev-group .seg').forEach(function (b) { b.setAttribute('aria-pressed', String(Number(b.dataset.sev) === form.severity)); });
     form.dur = e.duration == null ? null : e.duration;
@@ -1272,16 +1392,10 @@ dl.rows dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-widt
     }
   });
   $('#entry-form').addEventListener('input', function (ev) {
-    if (ev.target.id === 'f-when') whenTouched = true;
+    if (ev.target.id === 'f-when') { whenTouched = true; whenChosen = null; refreshWhenChips(); }
     if (ev.target.id === 'f-dur-n' || ev.target.id === 'f-dur-u') onCustomDur();
     if (ev.target.id === 'f-location') refreshLocationChips();
     updateSummaries();
-  });
-  $$('#when-quick .chip').forEach(function (b) {
-    b.addEventListener('click', function () {
-      $('#f-when').value = toInputValue(Date.now() - Number(b.dataset.off) * 60000);
-      whenTouched = Number(b.dataset.off) > 0;
-    });
   });
   $$('#sev-group .seg').forEach(function (b) { b.addEventListener('click', function () { setSeverity(Number(b.dataset.sev)); }); });
   $$('.opt').forEach(function (b) { b.addEventListener('click', function () { setLevel(b.dataset.group, b.dataset.v); }); });

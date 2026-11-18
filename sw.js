@@ -3,7 +3,7 @@
 // never cached or touched here.
 //
 // When you change any app file, bump VERSION so phones pick up the update.
-var VERSION = '2';
+var VERSION = '3';
 var CACHE = 'seizure-log-' + VERSION;
 var SHELL = [
   './',

@@ -25,11 +25,12 @@ const sheetObj = {
   getMaxColumns: () => 26, insertColumnsAfter(){}, getLastRow: () => grid.length, deleteRow: r => { grid.splice(r-1, 1); }, setFrozenRows(){}
 };
 let activeUser = '';
+const props = { APP_KEY: KEY };
 const ctx = { console, JSON,
   SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetObj, getUrl: () => 'https://docs.google.com/spreadsheets/d/TESTSHEET' }) },
   LockService: { getScriptLock: () => ({ waitLock(){}, releaseLock(){} }) },
   Utilities: { getUuid: () => 'srv-' + Math.random().toString(36).slice(2, 10) },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k === 'APP_KEY' ? KEY : null), setProperty(){} }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); } }) },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ s, setMimeType() { return this; } }) },
   Session: { getActiveUser: () => ({ getEmail: () => activeUser }), getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }) },
   HtmlService: {}, Logger: { log(){} } };
@@ -49,6 +50,7 @@ guard.staleSave = staleResult.notes === 'newer' ? 'older edit ignored' : 'older 
 ctx.saveEntry_(Object.assign({}, fresh, { notes: '', updated: seededAt + 3000 }));
 
 let apiDown = false;
+let oldServer = false;
 let apiCalls = 0;
 
 /* ---------- static server for the app ---------- */
@@ -71,12 +73,16 @@ const server = http.createServer((req, res) => {
   const errs = [];
   p.on('pageerror', e => errs.push('pageerror: ' + e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
-  await context.route(API, async route => {
+  const apiHandler = async route => {
     apiCalls++;
     if (apiDown) return route.abort('internetdisconnected');
-    const out = ctx.doPost({ postData: { contents: route.request().postData() } });
-    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }, body: out.s });
-  });
+    const body = route.request().postData();
+    let text;
+    if (oldServer && JSON.parse(body).action === 'prefs') text = JSON.stringify({ ok: false, error: 'unknown action' });
+    else text = ctx.doPost({ postData: { contents: body } }).s;
+    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }, body: text });
+  };
+  await context.route(API, apiHandler);
   const R = {};
   const sync = () => p.textContent('#sync-text');
   const wait = ms => p.waitForTimeout(ms);
@@ -110,7 +116,7 @@ const server = http.createServer((req, res) => {
   // B: saved while the Sheet can't be reached
   apiDown = true;
   await p.click('.tabs a[data-view="log"]');
-  await p.click('#when-quick .chip[data-off="60"]');
+  await p.click('#chips-when .chip[data-min="60"]');
   await p.click('.seg[data-sev="1"]');
   await p.click('#btn-save'); await wait(400);
   R.s5_offlineSync = await sync();
@@ -220,6 +226,52 @@ const server = http.createServer((req, res) => {
     return keys.some(e => (e.symptoms || []).indexOf('Nausea') >= 0);
   });
 
+  // When shortcuts: more options, highlight, add your own, remove
+  await p.click('.tabs a[data-view="log"]');
+  R.w1_count = await p.locator('#chips-when .chip').count();
+  const before = Date.now();
+  await p.click('#chips-when .chip[data-min="5"]');
+  const whenVal = await p.inputValue('#f-when');
+  R.w2_fiveMinAgo = Math.abs(new Date(whenVal).getTime() - (before - 5 * 60000)) < 90000;
+  R.w2_pressed = await p.getAttribute('#chips-when .chip[data-min="5"]', 'aria-pressed');
+  await p.click('#chips-when .chip-tool:has-text("Edit list")');
+  await p.fill('#add-when', '7'); await p.click('.when-add button');
+  await p.click('#chips-when .chip.removable[data-min="45"]');
+  await p.screenshot({ path: OUT + 'when-edit.png' });
+  await p.click('#chips-when .chip-tool:has-text("Done")');
+  R.w3_labels = await p.$$eval('#chips-when .chip', n => n.map(x => x.textContent));
+  await wait(800);
+  R.w4_serverPrefs = props.APP_PREFS ? JSON.parse(props.APP_PREFS) : null;
+
+  // A second device picks up the same lists after connecting
+  const ctxB = await b.newContext({ viewport: { width: 400, height: 860 } });
+  await ctxB.route(API, apiHandler);
+  const q = await ctxB.newPage();
+  q.on('pageerror', e => errs.push('pageerror(B): ' + e.message));
+  await q.goto(BASE);
+  await q.click('.tabs a[data-view="setup"]');
+  await q.fill('#cfg-url', API); await q.fill('#cfg-key', KEY);
+  await q.click('#btn-cfg-save'); await q.waitForTimeout(1200);
+  await q.click('.tabs a[data-view="log"]');
+  R.w5_deviceB_when = await q.$$eval('#chips-when .chip', n => n.map(x => x.textContent));
+  await q.click('#sec-what > summary');
+  R.w5_deviceB_symptoms = await q.$$eval('#chips-symptoms .chip', n => n.map(x => x.textContent));
+  await ctxB.close();
+
+  // An Apps Script deployment without the prefs action must not break syncing
+  oldServer = true;
+  const ctxC = await b.newContext({ viewport: { width: 400, height: 860 } });
+  await ctxC.route(API, apiHandler);
+  const c3 = await ctxC.newPage();
+  await c3.goto(BASE);
+  await c3.click('.tabs a[data-view="setup"]');
+  await c3.fill('#cfg-url', API); await c3.fill('#cfg-key', KEY);
+  await c3.click('#btn-cfg-save'); await c3.waitForTimeout(1200);
+  R.w6_oldServerSync = await c3.textContent('#sync-text');
+  R.w6_oldServerEntries = await c3.evaluate(() => JSON.parse(localStorage.getItem('sl.entries')).length);
+  await ctxC.close();
+  oldServer = false;
+
   await p.emulateMedia({ colorScheme: 'dark' });
   await p.click('.tabs a[data-view="setup"]');
   await p.screenshot({ path: OUT + 'pwa-setup-dark.png' });
@@ -249,6 +301,13 @@ const server = http.createServer((req, res) => {
     ['restore puts a chip back', R.c4_afterRestore.includes('Headache')],
     ['typing a removed chip brings it back selected', R.c5_typedBack.includes('Eye flashes')],
     ['past entries keep removed values', R.c6_historyKeepsNausea === true],
+    ['When has more shortcuts', R.w1_count >= 11],
+    ['"5 min ago" sets the time and stays highlighted', R.w2_fiveMinAgo && R.w2_pressed === 'true'],
+    ['custom shortcut added, removed one gone', R.w3_labels.includes('7 min ago') && !R.w3_labels.includes('45 min ago')],
+    ['chip lists saved to the Sheet side', !!R.w4_serverPrefs && R.w4_serverPrefs.when.includes(7) && R.w4_serverPrefs.hidden.when.includes('45')],
+    ['second device gets the same When list', R.w5_deviceB_when.includes('7 min ago') && !R.w5_deviceB_when.includes('45 min ago')],
+    ['second device gets removed symptom chips', !R.w5_deviceB_symptoms.includes('Nausea')],
+    ['old Apps Script without prefs still syncs entries', /^All entries synced/.test(R.w6_oldServerSync) && R.w6_oldServerEntries >= 3],
     ['no horizontal overflow', R.overflow === false],
     ['no unexpected page errors', errs.every(e => /ERR_INTERNET_DISCONNECTED/.test(e))]
   ];
