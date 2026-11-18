@@ -47,8 +47,12 @@ Adding or changing a stored field means changing both sides:
    new `Code.gs` must be pasted into the Apps Script project and saved, then
    **Deploy → Manage deployments → edit "Installable app API" → New version →
    Deploy**. Editing that deployment keeps its link, so devices stay connected.
-   Also redeploy the older owner-only deployment if its page should keep working
-   with the new fields.
+   Also redeploy the older owner-only deployment, "Seizure Log (backup page)", if
+   its page should keep working with the new fields.
+   When deploying a new version, retype the deployment's name in the
+   Description field: Apps Script otherwise blanks it ("Untitled") and files the
+   previous version under Archived with the old name. Archived entries are
+   history only; the active deployment keeps its link.
 
 Changes to `index.html` alone need no Google-side step.
 
